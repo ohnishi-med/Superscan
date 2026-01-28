@@ -1,0 +1,23 @@
+# System
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.venv
+.env
+venv/
+env/
+
+# Node
+node_modules/
+dist/
+.env.local
+
+# Editor
+.vscode/
+.idea/
+
+# Agent
+.gemini/
