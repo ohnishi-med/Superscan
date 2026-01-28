@@ -4,17 +4,15 @@ import os
 import threading
 from datetime import datetime
 import uuid
-from dotenv import load_dotenv
-
-load_dotenv()
+from config_manager import config_manager
 
 class CameraManager:
     def __init__(self):
-        self.camera_index = int(os.getenv("CAMERA_INDEX", 0))
-        self.min_area = int(os.getenv("MIN_AREA_THRESHOLD", 5000))
-        self.motion_wait = float(os.getenv("MOTION_WAIT_TIME", 1.5))
-        self.eco_delay = float(os.getenv("ECO_MODE_DELAY", 10.0))
-        self.temp_dir = os.getenv("TEMP_DIR", "./temp")
+        self.camera_index = int(config_manager.get("CAMERA_INDEX", 0))
+        self.min_area = int(config_manager.get("MIN_AREA_THRESHOLD", 5000))
+        self.motion_wait = float(config_manager.get("MOTION_WAIT_TIME", 1.5))
+        self.eco_delay = float(config_manager.get("ECO_MODE_DELAY", 10.0))
+        self.temp_dir = config_manager.get("TEMP_DIR", "./temp")
         
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)

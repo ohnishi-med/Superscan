@@ -5,6 +5,9 @@ import os
 import glob
 from cv2_enumerate_cameras import enumerate_cameras
 from ocr_processor import ocr_processor
+from config_manager import config_manager
+from pydantic import BaseModel
+from typing import Dict, Any
 
 app = FastAPI()
 
@@ -18,7 +21,7 @@ app.add_middleware(
 )
 
 # Serve scanned files
-TEMP_DIR = os.getenv("TEMP_DIR", "./temp")
+TEMP_DIR = config_manager.get("TEMP_DIR", "./temp")
 if not os.path.exists(TEMP_DIR):
     os.makedirs(TEMP_DIR)
 app.mount("/files", StaticFiles(directory=TEMP_DIR), name="scanned_files")
@@ -49,6 +52,21 @@ def get_cameras():
         return {"cameras": cameras}
     except Exception as e:
         return {"error": str(e), "cameras": []}
+
+class SettingsUpdate(BaseModel):
+    settings: Dict[str, Any]
+
+@app.get("/settings")
+async def get_settings():
+    """Returns the current application settings."""
+    return config_manager.get_all()
+
+@app.post("/settings")
+async def update_settings(update: SettingsUpdate):
+    """Updates the application settings."""
+    for key, value in update.settings.items():
+        config_manager.set(key, value)
+    return {"status": "success", "updated": update.settings}
 
 @app.get("/check_new_scan")
 def check_new_scan():
