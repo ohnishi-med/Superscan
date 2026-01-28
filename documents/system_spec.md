@@ -19,13 +19,19 @@
     - タスクトレイのアイコンを右クリック -> [終了] を選択する。
     - **保存**: ローカルの一時フォルダ (`./temp` 等) にファイルを保存。**画像データは1日経過後に自動削除**。
 
-2.  **ナビゲーション & アップロード (Chrome Extension)**
+2.  **ナビゲーション & 自動入力 (Chrome Extension)**
     - **トリガー**: `GET /check_new_scan` をポーリング
     - **アクション**: 
-        - 新しいデータを受信（`file_url` を含む）
-        - 現在または新しいタブで患者ファイルページへ遷移（URLパターン設定に基づく）
-        - ページ読み込み待機
-        - URLからファイルデータ (Blob) を取得し、ドロップゾーンへ自動アップロード
+        - 新しいデータを受信（`patient_id`, `file_url` を含む）
+        - **ページ遷移・検索操作 (Digikar-Specific Flow)**:
+            - **課題**: デジカル等の電子カルテでは、1. 検索ボタンを押す -> 2. モーダルでID入力 -> 3. 検索結果一覧から「表示」を押して新規タブで開く、という3段階のステップが必要。
+            - **解決策**: 拡張機能が以下の全ステップを自動実行する。
+            - 1. **検索ボタン検知**: 虫眼鏡ボタン（`.css-1nnxsgs`）をクリックして検索窓を出現させる。
+            - 2. **ID入力 & 実行**: `placeholder="患者番号..."` にIDを入力し、Enterキーを送信。
+            - 3. **結果クリック**: 検索結果が表示されるのを `MutationObserver` で監視し、出現した「表示」ボタン（`target="_blank"` のリンク）を自動クリックして、別タブで本番のカルテ画面を開く。
+        - **待機 & アップロード**:
+            - 遷移後、`dropZoneSelector` が表示されるまで監視（最大10秒）。
+            - 要素が出現したら、`file_url` からデータを取得し、ドメインのドロップエリアへ擬似的にファイルをドロップ/選択してアップロード。
     - **完了**: `POST /mark_processed` を呼び出してサーバーデータをクリア
 
 ## 技術スタック (Technology Stack)
@@ -34,10 +40,12 @@
 - **フレームワーク**: FastAPI, Uvicorn
 - **GUI/常駐**: `pystray`, `Pillow` (タスクトレイアイコン表示・管理)
 - **画像処理**: OpenCV (動体検知, キャプチャ)
-- **AI**: Azure OpenAI (GPT-4o), `python-dotenv`
+- **OCR (文字認識)**: 
+    - **Primary**: `EasyOCR` (Deep Learningベース, 高精度)
+    - **Alternative**: `Tesseract` (`pytesseract`) - 環境依存だが軽量。EasyOCRが重い場合のフォールバック候補として仕様に含める。
 - **セキュリティ**:
     - **CORS**: `Access-Control-Allow-Origin: *` (ローカル開発用)
-    - **API Key**: `.env` ファイルで管理し、リポジトリには含めない。
+    - **API Key**: 不要 (ローカル完結のため)
 - **エンドポイント**:
     - `GET /check_new_scan`: JSON `{ patient_id: "...", file_url: "...", file_type: "..." }` を返す
     - `GET /files/{filename}`: 一時保存された静的ファイルを配信
@@ -135,15 +143,17 @@
     - 手法: Cannyエッジ検出 (`cv2.Canny`) + 輪郭抽出 (`cv2.findContours`)
     - ロジック: 最大の面積を持つ4角形の輪郭を探し、`cv2.getPerspectiveTransform` でゆがみ補正を行って切り出す。
 
-### 6.2. Azure OpenAI プロンプト設計
+### 6.2. OCR ロジック設計 (ID Extraction)
 - **目的**: 画像から患者IDのみを抽出する。
-- **System Prompt**:
-    > You are an AI assistant that extracts patient information from medical documents.
-- **User Prompt**:
-    > Analyze this image. Find the "Patient ID" (also known as ID Number, Card No, or 診察券番号).
-    > Return the result in strictly valid JSON format: { "patient_id": "123456" }.
-    > If no ID is found, return { "patient_id": null }.
-    > Do not include any other text.
+- **採用ライブラリ**: `EasyOCR` (ja, en mode)
+- **処理フロー**:
+    1.  キャプチャ画像を読み込み。
+    2.  `reader.readtext(image)` を実行。
+    3.  検出されたテキストリストから、`REGEX` (正規表現) を用いて「8桁〜10桁の数字」を探索する。
+    4.  最も確度の高い（あるいは中央にある）数字列を Patient ID として採用する。
+- **代替案 (Performance Fallback)**:
+    - EasyOCRの初期化ロード（約2〜3秒）や推論（約1秒）がUXを阻害する場合、`Tesseract` (`pytesseract`) への切り替えを検討する。
+    - Tesseractは別途インストールが必要だが、動作は非常に軽量。
 
 ### 6.4. アーキテクチャの並行処理
 - **スレッド構成 (Standard Threading Pattern)**:
@@ -164,10 +174,8 @@
     MOTION_WAIT_TIME=1.5
     ECO_MODE_DELAY=10.0
     
-    # Azure OpenAI
-    AZURE_OPENAI_API_KEY=...
-    AZURE_OPENAI_ENDPOINT=...
-    AZURE_DEPLOYMENT_NAME=gpt-4o
+    # OCR (Optional Tesseract Path)
+    # TESSERACT_PATH=C:\Program Files\Tesseract-OCR\tesseract.exe
     
     # System
     TEMP_DIR=./temp  # 未設定時は自動作成

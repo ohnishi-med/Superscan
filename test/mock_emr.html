@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Mock 電子カルテ 画面</title>
+    <style>
+        body {
+            font-family: "Meiryo", sans-serif;
+            padding: 40px;
+            background-color: #f0f4f8;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            max-width: 600px;
+            margin: auto;
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 1.5em;
+            border-left: 5px solid #3498db;
+            padding-left: 15px;
+        }
+
+        .form-group {
+            margin-top: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 1.1em;
+        }
+
+        .hint {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 10px;
+        }
+
+        .box {
+            background: #e8f0fe;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 30px;
+            border: 1px dashed #3498db;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container" id="search_view">
+        <h1>Digikar風 電子カルテ (Mock)</h1>
+        <div style="margin-bottom: 20px;">
+            <!-- Digikar Magnifying Glass Button -->
+            <button class="css-1nnxsgs" style="padding:10px; cursor:pointer;"
+                onclick="document.getElementById('modal').style.display='block'">🔍 検索窓を開く</button>
+        </div>
+
+        <div id="modal" style="display:none; border:2px solid #ccc; padding:20px; background:#fff; margin-top:20px;">
+            <label for="patient_search_input">患者検索</label>
+            <input type="text" id="patient_search_input" placeholder="患者番号、フリガナ、名前を入力してください">
+            <button id="search_button" style="margin-top:10px;" onclick="showMockResult()">検索実行</button>
+            <div id="search_results"
+                style="display:none; margin-top:20px; border-top:1px solid #eee; padding-top:10px;">
+                <p>検索結果: 1件</p>
+                <table border="1" style="width:100%; text-align:left; border-collapse:collapse;">
+                    <tr>
+                        <th>患者番号</th>
+                        <th>氏名</th>
+                        <th>操作</th>
+                    </tr>
+                    <tr>
+                        <td>12345678</td>
+                        <td>テスト 次郎</td>
+                        <td><a href="?internal_id=2355092" target="_blank" id="mock_show_link"
+                                style="background:#2196F3; color:#fff; padding:5px 10px; text-decoration:none; border-radius:4px;">表示</a>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" id="chart_view" style="display:none;">
+        <ul style="list-style:none; padding:0; display:flex; border-bottom:1px solid #ccc;">
+            <li style="padding:10px; cursor:pointer; background:#eee;">サマリー</li>
+            <li id="file_tab_mock" style="padding:10px; cursor:pointer;" onclick="showFileList()">ファイル</li>
+            <li style="padding:10px; cursor:pointer;">カルテ</li>
+        </ul>
+
+        <div id="file_list_view" style="display:none; padding-top:20px;">
+            <h1>患者ファイル一覧 (Internal ID: <span id="pk_display"></span>)</h1>
+            <button id="add_file_btn"
+                style="padding:10px; background:#4CAF50; color:white; border:none; cursor:pointer;">+ 文書作成</button>
+            <div id="upload_modal" style="display:none; margin-top:20px; border:2px dashed #4CAF50; padding:20px;">
+                <h3>添付ファイル追加 (Mock Modal)</h3>
+                <input type="file" id="patient_id_input">
+                <button id="final_add_btn"
+                    style="margin-top:10px; background:#2e7d32; color:white; padding:5px 15px; border:none; cursor:pointer;"
+                    onclick="submitMockUpload()">追加</button>
+            </div>
+        </div>
+        <button onclick="location.href='?'" style="margin-top:20px;">検索へ戻る</button>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const internalId = urlParams.get('internal_id');
+        const page = urlParams.get('page');
+
+        if (internalId) {
+            document.getElementById('search_view').style.display = 'none';
+            document.getElementById('chart_view').style.display = 'block';
+            document.getElementById('pk_display').innerText = internalId;
+        } else if (page === 'reception') {
+            document.getElementById('search_view').style.display = 'block';
+        }
+
+        function showFileList() {
+            document.getElementById('file_tab_mock').style.background = '#eee';
+            document.getElementById('file_list_view').style.display = 'block';
+        }
+
+        function showMockResult() {
+            document.getElementById('search_results').style.display = 'block';
+        }
+
+        function submitMockUpload() {
+            document.getElementById('upload_modal').style.display = 'none';
+            alert('Mock: ファイルをアップロードしました。');
+        }
+
+        document.getElementById('add_file_btn').onclick = function () {
+            document.getElementById('upload_modal').style.display = 'block';
+        };
+
+        // Listen for Enter key on search input
+        document.getElementById('patient_search_input').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                showMockResult();
+            }
+        });
+    </script>
+
+    <div class="hint">
+        ※Superscan拡張機能が有効な場合、書画カメラでスキャンするとここにIDが入ります。
+    </div>
+
+    <div class="box">
+        <strong>テストのヒント:</strong><br>
+        Pythonのバックエンドが動いている状態で、15秒待つとMockカメラが「撮影」を行い、この画面にIDが自動入力されるはずです。
+    </div>
+    </div>
+</body>
+
+</html>
