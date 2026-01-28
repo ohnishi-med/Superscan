@@ -1,42 +1,62 @@
 # Camera-EMR Linkage System Specification （電子カルテ連携システム仕様書）
 
 ## 概要 (Overview)
-Webカメラでのスキャンと画像解析を行うローカルPythonサーバーと、ブラウザ操作およびファイルアップロードを行うChrome拡張機能を使用し、既存の電子カルテ（Chrome上で動作するWebアプリケーション）へのファイルアップロードを自動化するシステムです。
+書画カメラでのスキャンと画像解析を行うローカルPythonサーバーと、ブラウザ操作およびファイルアップロードを行うChrome拡張機能を使用し、既存の電子カルテ（Chrome上で動作するWebアプリケーション）へのファイルアップロードを自動化するシステムです。
 
 ## ユーザーと前提 (User Role & Assumption)
 - **ユーザー**: 医療スタッフ
+- **ハードウェア**: 書画カメラ（常時下向き稼働）
 - **環境**: Chromeブラウザ（電子カルテにログイン済みであること）
 - **制約**: ログインの自動化は行わない。既存のセッションを利用する。
 
-## システムワークフロー (System Workflow)
-1.  **スキャン (Python Backend)**
-    - **トリガー**: Webカメラが書類を検知（動体検知 -> 1.5秒静止）
-    - **アクション**: 画像キャプチャ
-    - **解析**: Azure OpenAI (GPT-4o) を使用して「患者ID」を抽出
-    - **保存**: メモリ内に {PatientID, Image(Base64)} を一時保存
+## ユーザーと前提 (User Role & Assumption)
+## 3. 起動と終了 (Startup & Shutdown)
+- **起動**:
+    - **自動起動（推奨）**: インストール時に Windows の「スタートアップ」に登録。
+    - **動作**: 起動すると **タスクトレイ（画面右下の通知領域）** に常駐します。
+    - **コンソール画面**: **「黒い画面」は表示されません** (バックグラウンド実行)。
+- **終了**:
+    - タスクトレイのアイコンを右クリック -> [終了] を選択する。
+    - **保存**: ローカルの一時フォルダ (`./temp` 等) にファイルを保存。**画像データは1日経過後に自動削除**。
+
 2.  **ナビゲーション & アップロード (Chrome Extension)**
     - **トリガー**: `GET /check_new_scan` をポーリング
     - **アクション**: 
-        - 新しいデータを受信
+        - 新しいデータを受信（`file_url` を含む）
         - 現在または新しいタブで患者ファイルページへ遷移（URLパターン設定に基づく）
         - ページ読み込み待機
-        - ドロップゾーンへ画像を自動アップロード
+        - URLからファイルデータ (Blob) を取得し、ドロップゾーンへ自動アップロード
     - **完了**: `POST /mark_processed` を呼び出してサーバーデータをクリア
 
 ## 技術スタック (Technology Stack)
 
 ### Part 1: Python Backend
 - **フレームワーク**: FastAPI, Uvicorn
+- **GUI/常駐**: `pystray`, `Pillow` (タスクトレイアイコン表示・管理)
 - **画像処理**: OpenCV (動体検知, キャプチャ)
 - **AI**: Azure OpenAI (GPT-4o), `python-dotenv`
-- **セキュリティ**: CORS (`Access-Control-Allow-Origin: *`)
+- **セキュリティ**:
+    - **CORS**: `Access-Control-Allow-Origin: *` (ローカル開発用)
+    - **API Key**: `.env` ファイルで管理し、リポジトリには含めない。
 - **エンドポイント**:
-    - `GET /check_new_scan`: JSON `{ patient_id: "...", image_b64: "..." }` または `null` を返す
-    - `POST /mark_processed`: 現在のデータをクリアする
+    - `GET /check_new_scan`: JSON `{ patient_id: "...", file_url: "...", file_type: "..." }` を返す
+    - `GET /files/{filename}`: 一時保存された静的ファイルを配信
+    - `POST /mark_processed`: 処理済みフラグを立てる
+    - **設定系**:
+        - `GET /cameras`: (Debug用) 利用可能なデバイス一覧を返す
+        - `GET /status`: 現在のカメラ設定や動作ステータスを返す
 
 ### Part 2: Chrome Extension
 - **マニフェスト**: V3
-- **権限**: `activeTab`, `scripting`, `host_permissions`
+- **構成要素**:
+    - **Service Worker (Background Script)**:
+        - `chrome.alarms` または `setInterval` を使用して `GET /check_new_scan` を常時ポーリング。
+        - Chromeが起動している限りバックグラウンドで動作。
+        - 新しいファイルを検知したら、電子カルテのタブを開く（またはアクティブにする）。
+    - **Content Script**:
+        - 電子カルテのページ (`targetUrlPattern`) でのみ実行。
+        - Service Worker からのメッセージ、またはページロードをトリガーにアップロード処理を実行。
+- **権限**: `activeTab`, `scripting`, `host_permissions` ("http://localhost:8000/*")
 - **設定 (`content_script.js`)**:
     ```javascript
     const KARTE_CONFIG = {
@@ -46,7 +66,172 @@ Webカメラでのスキャンと画像解析を行うローカルPythonサー�
     };
     ```
 
+- **設定・UI (Settings UI)**:
+    - **ポップアップ/オプション画面**:
+        - **カメラ選択**: 接続されているカメラ一覧を取得し、使用するカメラを選択・保存する。
+        - **Ecoモード設定**: 待機時間（秒）をスライダーまたは入力ボックスで設定する。
+        - 接続先電子カルテのURLパターン設定 (`targetUrlPattern`)
+        - アップロード先のセレクタ設定 (`dropZoneSelector`)
+        - システムステータス表示（接続中/切断）
+        - システムステータス表示（接続中/切断）
+
+## 4. アーキテクチャ選定理由 (Architecture Decisions)
+- **なぜ Chrome 拡張機能なのか？**:
+    - **要件**: 「医療スタッフが既にログインしている電子カルテ」を操作する必要がある。
+    - **理由**: Selenium や Puppeteer などの自動化ツールは、通常「新しいブラウザ」を立ち上げるため、既存のログインセッション（Cookie等）を引き継ぐのが難しく、ログイン処理の自動化も必要になってしまう。
+    - **結論**: 普段使っているChromeにインストールするだけで、今のログイン状態をそのまま利用できる「Chrome拡張機能」が最適。
+
+## 5. 機能振り分け設計 (Dual Mode Architecture)
+「文書スキャン」と「診察券受付」を1つのシステム・カメラで実現するための設計です。
+
+### 5.1. 振り分けロジック (Routing Logic)
+書画カメラに映った対象物の「組み合わせ」と「特徴」により、モードを判定します。
+
+| 状況 (Context) | モード (Mode) | 動作 (Action) |
+| :--- | :--- | :--- |
+| **診察券のみ** | **自動受付 (Reception)** | 診察券からIDを読み取り、電子カルテの受付一覧へ登録する。 |
+| **書類 + 診察券** | **文書スキャン (Document)** | IDのない手帳や書類でも、横に置かれた診察券からIDを特定。書類部分を切り出して保存する。 |
+| **ID付き書類のみ** | **文書スキャン (Document)** | 大きな書類(A4等)から直接IDを読み取り、保存する。 |
+
+**判定アルゴリズム (概略):**
+1.  **物体検知**: フレーム内にいくつの矩形があるか？
+2.  **サイズ分類**: それぞれが「カードサイズ」か「文書サイズ」か？
+    - カードサイズ 1枚のみ -> **受付**
+    - 文書サイズ or (文書 + カード) -> **文書スキャン**
+
+### 5.2. 処理フローの分岐 (詳細)
+1.  **共通**: 動体検知 -> 静止画キャプチャ
+2.  **解析 & 分岐**:
+    - **Case A: 診察券受付**:
+        - OCRでID取得 -> `GET /reception?id=...` (拡張機能へ指示)
+    - **Case B: 複合スキャン (手帳 + 診察券)**:
+        - 診察券エリアからOCRでID取得。
+        - **書類エリアのみ** をトリミングして画像化。
+        - `GET /check_new_scan` (拡張機能へ指示)
+
+### 5.3. 例外フロー (Exception Handling - Manual Input)
+**ID読み取り失敗時**:
+1.  **Backend**: `GET /check_new_scan` のレスポンスで `patient_id: null` を返す。
+2.  **Notification**: PCから「IDを入力してください」等の警告音またはエラー音を鳴らす。
+3.  **Extension**:
+    - ブラウザ上に ID入力ポップアップを表示。
+    - ユーザーがIDを手入力して「OK」を押すと、そのIDでアップロード処理を続行。
+    - 「キャンセル」を押すと、そのスキャンデータを破棄。
+
+## 6. 技術的詳細 (Technical Implementation Details)
+実装時に使用する具体的なアルゴリズムとパラメータ設定です。
+
+### 6.1. OpenCV 処理ロジック
+- **省電力モード (Eco Mode)**:
+    - **待機時**: フレームレートを落として監視 (例: 2 FPS)。解像度も検知用に縮小する。
+    - **検知時**: 動体検知直後に **アクティブモード** (通常 30 FPS / 高解像度) に切り替えて撮影準備に入る。
+    - **復帰**: スキャン完了後、一定時間（デフォルト: 10秒、`.env`で設定可）動きがなければ再び省電力モードへ。
+- **動体検知 (Motion Detection)**:
+    - 手法: `cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=16, detectShadows=False)`
+    - 判定: 背景差分マスクの白色領域（変化部分）の面積が `MIN_AREA_THRESHOLD` (例: 5000px) を超えたら「動きあり」とみなす。
+- **静止判定 (Stability Check)**:
+    - 「動きあり」から「動きなし」に遷移した後、`MOTION_WAIT_TIME` (1.5s) 秒間、面積変化が閾値以下であれば「スキャン対象」と確定する。
+- **文書切り出し (Document Cropping)**:
+    - 手法: Cannyエッジ検出 (`cv2.Canny`) + 輪郭抽出 (`cv2.findContours`)
+    - ロジック: 最大の面積を持つ4角形の輪郭を探し、`cv2.getPerspectiveTransform` でゆがみ補正を行って切り出す。
+
+### 6.2. Azure OpenAI プロンプト設計
+- **目的**: 画像から患者IDのみを抽出する。
+- **System Prompt**:
+    > You are an AI assistant that extracts patient information from medical documents.
+- **User Prompt**:
+    > Analyze this image. Find the "Patient ID" (also known as ID Number, Card No, or 診察券番号).
+    > Return the result in strictly valid JSON format: { "patient_id": "123456" }.
+    > If no ID is found, return { "patient_id": null }.
+    > Do not include any other text.
+
+### 6.4. アーキテクチャの並行処理
+- **スレッド構成 (Standard Threading Pattern)**:
+    - **Main Thread**: `pystray` (タスクトレイアイコン) のイベントループを実行。WindowsのGUIイベントを処理するため、メインスレッド必須。
+    - **Worker Thread**: `FastAPI` (Uvicorn) サーバーを実行。デーモンスレッドとして起動し、アプリ終了時に道連れで終了させる標準的な構成。
+
+### 6.5. マルチカメラ・並行利用対応
+- **カメラデバイスの独立性**:
+    - 指定された `CAMERA_INDEX` (またはデバイスパス) のみに接続を試行する。
+    - 他のカメラ (例: Web会議用のWebカメラ) には一切干渉しないため、Zoom等との**同時並行利用が可能**。
+- **排他制御のエラーハンドリング**:
+    - 起動時、設定されたカメラが他のアプリで使用中の場合:
+        - タスクトレイに「カメラが使用できません」と通知。
+        - アプリは終了せず「待機モード」となり、ユーザーが設定画面で別のカメラを選べるようにする。
+    # Camera
+    CAMERA_INDEX=0
+    MIN_AREA_THRESHOLD=5000
+    MOTION_WAIT_TIME=1.5
+    ECO_MODE_DELAY=10.0
+    
+    # Azure OpenAI
+    AZURE_OPENAI_API_KEY=...
+    AZURE_OPENAI_ENDPOINT=...
+    AZURE_DEPLOYMENT_NAME=gpt-4o
+    
+    # System
+    TEMP_DIR=./temp  # 未設定時は自動作成
+    RETENTION_DAYS=1
+    ```
+
+## 7. UIデザイン仕様 (UI Design Specifications)
+Chrome拡張機能の3つの主要画面の構成案です。
+
+### 7.1. タスクトレイ・メニュー (System Tray Menu)
+常駐アイコンを右クリックして設定します。**ハードウェア・動作設定はこちらで行います。**
+- **ステータス**: "Superscan: 稼働中" (クリック不可ラベル)
+- **カメラ選択**:
+    - [x] Camera A
+    - [ ] Camera B
+    - [ ] 再スキャン...
+- **Ecoモード待機時間**:
+    - [ ] 5秒
+    - [x] 10秒
+    - [ ] 30秒
+    - [ ] 60秒
+- **フォルダを開く**:
+    - [ログフォルダを開く]
+    - [一時保存フォルダを開く] (デフォルト: `./temp`)
+- **高度な設定**:
+    - [設定ファイルを開く (.env)] (フォルダパス等はここから変更可能)
+- **アプリケーション**:
+    - [終了]
+
+### 7.2. Chrome拡張機能 ポップアップ (Popup)
+- **メイン**: システムステータスと直近のスキャン結果のみ表示。
+- **設定ボタン**: 拡張機能の詳細設定画面 (`options.html`) を開く。
+
+### 7.3. Chrome拡張機能 設定画面 (Options Page)
+**電子カルテとの連携設定はこちらで行います。**
+- **かんたん設定ウィザード (Interactive Setup)**:
+    - **[設定を開始する] ボタン**:
+        1.  「電子カルテの患者ページを開いてください」と案内。
+        2.  「患者IDが表示されている場所をクリックしてください」 -> ID要素とURLパターンを自動学習。
+        3.  「ファイルをアップロードする場所（ドロップゾーン）をクリックしてください」 -> セレクタを自動取得。
+        4.  設定完了。
+- **高度な設定 (Advanced)**:
+    - **ターゲットURL**: テキスト入力 (自動設定された値を編集可能)
+    - **ドロップゾーン**: CSSセレクタ入力
+    - **テストモード**: テスト用のダミーデータを送信するボタン
+- **保存**: [設定を保存] ボタン
+
+### 7.4. ID手入力モーダル (Manual Input Modal)
+AI読み取り失敗時、電子カルテ画面上にオーバーレイ表示。
+- **タイトル**: "⚠️ IDを読み取れませんでした"
+- **画像プレビュー**:
+    - **読み取れなかった診察券の画像を表示**。
+    - ユーザーは手元のカードを見直す必要がなく、画面だけを見て入力できる。
+- **入力フォーム**:
+    - "画像に書かれているIDを入力してください"
+    - テキストボックス (数値のみ、オートフォーカス)
+- **ボタン**:
+    - [キャンセル] (破棄)
+    - [送信] (アップロード続行)
+
 ## 実装フェーズ (Implementation Phases)
-1.  **バックエンド実装**: FastAPIセットアップ, OpenCVロジック, Azure統合
-2.  **拡張機能実装**: Manifest設定, ポーリングロジック, DOM操作（ドラッグ＆ドロップのエミュレーション）
+1.  **Phase 1 & 2**: 要件定義・設計・環境構築（**現在ここ**）
+2.  **Phase 3**: **文書スキャン機能** の実装 (MVP)
+3.  **Phase 4**: **自動受付機能** の追加実装と統合
+4.  **Phase 5**: 統合テスト・運用調整
+2.  **拡張機能実装**: Manifest設定, Service Workerでのポーリング, DOM操作
 3.  **統合テスト**: モック電子カルテページを使用したEnd-to-Endフローの検証
