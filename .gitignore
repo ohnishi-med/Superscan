@@ -21,3 +21,6 @@ dist/
 
 # Agent
 .gemini/
+
+# Temporary files
+temp/
